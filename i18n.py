@@ -16,6 +16,7 @@ AR = {
     "These children use their assigned stop; the office has been shown the list.": "يستخدم هؤلاء الأطفال محطتهم المحددة؛ وقد عُرضت القائمة على المكتب.",
     "Start navigation before moving — the screen and voice update by themselves, nothing to touch while driving.": "ابدأ الملاحة قبل التحرك — تتحدث الشاشة والصوت تلقائياً، لا حاجة للمس أي شيء أثناء القيادة.",
     "Home location (pickup / drop-off)": "موقع المنزل (الركوب / النزول)",
+    "Waiting for the supervisor to start the trip. This screen then shows the NEXT STOP by itself.": "بانتظار أن يبدأ المشرف الرحلة. ستعرض هذه الشاشة المحطة التالية تلقائياً.",
     "Sign in": "تسجيل الدخول",
     "Username": "اسم المستخدم",
     "PIN / password": "الرمز / كلمة المرور",

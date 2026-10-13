@@ -130,9 +130,10 @@ def _comms():
     msgs = E.bus_messages(bus_id, only_open=True)
     seen = st.session_state.setdefault(f"{K}_seenmsg", set())
     new = [m_ for m_ in msgs if m_["id"] not in seen]
-    if new:
-        alert_sound("Message from the office. " + new[0]["text"], key=f"{K}_msnd{new[0]['id']}")
+    if new:   # refresh the whole screen (counts, stops) and announce the message
+        st.session_state[f"{K}_say"] = "Message from the office. " + new[0]["text"]
         seen.update(m_["id"] for m_ in new)
+        st.rerun()
     for m_ in msgs:
         c1, c2 = st.columns([4, 1], vertical_alignment="center")
         c1.markdown(f"<div class='warn'>✉️ <b>{t('Message from office')}</b> · {m_['ts'][11:16]} · {m_['sender']}<br>{m_['text']}</div>",
@@ -145,6 +146,9 @@ def _comms():
                     unsafe_allow_html=True)
 
 
+if st.session_state.get(f"{K}_say"):        # announcement queued by an auto-refresh (voice + chime)
+    st.session_state[f"{K}_sayn"] = st.session_state.get(f"{K}_sayn", 0) + 1
+    alert_sound(st.session_state.pop(f"{K}_say"), key=f"{K}_snd{st.session_state[f'{K}_sayn']}")
 _comms()
 with st.popover("🆘 SOS — " + t("Emergency"), width="stretch", type="primary"):
     st.markdown("**" + t("Send an emergency alert to the transport office") + "**")
@@ -194,6 +198,33 @@ if not run:
                            file_name=f"{bus['bus_no']}_{today}_roster.enc", help="Encrypted with this device's key — unreadable if the tablet is lost.")
 
     if is_driver:
+        # v2.0: the driver sees the route of the next trip before departure (read-only); the supervisor starts the trip
+        _left = [n for n in TRIPS if n not in runs_today]
+        if not _left:
+            msg("ok", f"<b>{t('All trips for today are completed')}</b>")
+            st.stop()
+        _appr = [n for n in _left if P.active_plan(today, bus_id, n)]     # a trip the office has already approved a route for
+        _nt = _appr[0] if _appr else (default_trip if default_trip in _left else _left[0])
+        _act = P.active_plan(today, bus_id, _nt)
+        _pv = json.loads(_act["plan_json"]) if _act else P.plan_trip(bus_id, today, _nt)
+        st.divider()
+        st.subheader("🗺 " + t("Route plan") + f" — Trip {_nt}")
+        st.caption(f"{TRIPS[_nt]['label']} · {TRIPS[_nt]['window'][0]}–{TRIPS[_nt]['window'][1]} · "
+                   + (f"approved route v{_act['version']}" if _act else "draft — approved when the supervisor starts the trip"))
+        st.dataframe(pd.DataFrame([{"#": s_["seq"], "Stop": s_["name"], "Planned": s_["eta"], "Board": len(s_["board"]),
+                                    "Get off": len(s_["exit"]), "On board after": s_["occ_after"]} for s_ in _pv["stops"]]),
+                     hide_index=True, width="stretch")
+        if _pv["flags"]:
+            msg("warn", f"{len(_pv['flags'])} {t('location issue(s) before departure')} — "
+                + t("These children use their assigned stop; the office has been shown the list."))
+        st.info(t("Waiting for the supervisor to start the trip. This screen then shows the NEXT STOP by itself."))
+
+        @st.fragment(run_every=10)
+        def _wait_for_start():          # no tapping needed: switches to the trip screen as soon as the trip starts
+            if E.open_run(bus_id):
+                st.rerun()
+
+        _wait_for_start()
         st.stop()
     st.divider()
     st.subheader("▶ " + t("Start trip"))
@@ -421,6 +452,8 @@ def submit(kind, badge=None, sid=None, method="QR", extra=None, ctx=None, pend_i
 if is_driver:
     @st.fragment(run_every=10)
     def _driver_next():
+        if not offline and not E.open_run(bus_id):     # trip closed by the supervisor: back to today's list automatically
+            st.rerun()
         _l = replica(run["id"], dstore.load_queue(dev_id))[1] if dev_id and dstore.load_queue(dev_id) else E.run_lines(run["id"])
         _stops = route_stops(route, _l)
         _w = stop_work(_l, _stops)
@@ -448,9 +481,11 @@ if is_driver:
         if _after:
             st.caption(t("Then") + ": " + " → ".join(_name[i] for i in dict.fromkeys(_after)))
         if st.session_state.get(f"{K}_drvnext", "init") != _n:
-            if st.session_state.get(f"{K}_drvnext", "init") != "init":
-                alert_sound(f"Next stop, {big}" if _n is not None else "All stops done", key=f"{K}_dsnd{_n}")
+            _first = st.session_state.get(f"{K}_drvnext", "init") == "init"
             st.session_state[f"{K}_drvnext"] = _n
+            if not _first:   # stop finished: refresh the whole screen (counts, lists) and announce the next stop
+                st.session_state[f"{K}_say"] = f"Next stop, {big}" if _n is not None else "All stops done"
+                st.rerun()
 
     _driver_next()
 
