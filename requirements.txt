@@ -1,0 +1,10 @@
+streamlit>=1.50
+pandas
+pydeck
+openpyxl
+opencv-python-headless
+qrcode[pil]
+reportlab
+numpy
+cryptography
+tzdata
