@@ -115,6 +115,12 @@ def decide_location(loc_id, approve, user, role, note=""):
                   ("APPROVED" if approve else "REJECTED", user, ts(), note, loc_id))
         db.audit(user, role, "LOCATION_APPROVED" if approve else "LOCATION_REJECTED", "student", row["student_id"],
                  f"{row['kind']} v{row['version']}: {row['address']} {note}", c)
+        linked = None
+        if row["kind"] == "PICKUP":   # a "drop-off same as pickup" submitted together follows the pickup decision
+            linked = q1("""SELECT id FROM student_locations WHERE student_id=? AND kind='DROPOFF' AND status='PENDING' AND same_as_pickup=1
+                           AND requested_by=? AND requested_ts=?""", (row["student_id"], row["requested_by"], row["requested_ts"]), c)
+    if linked:
+        decide_location(linked["id"], approve, user, role, note or "with the pickup location")
     return True
 
 

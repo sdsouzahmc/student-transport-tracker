@@ -26,6 +26,8 @@ m[2].metric("Missing", int(df["Status"].str.contains("missing").sum()) if not df
 m[3].metric("Invalid / no safe stop", int(df["Status"].str.contains("invalid|no safe stop").sum()) if not df.empty else 0)
 m[4].metric("Waiting for approval", len(pend))
 
+if "loc_jump" in st.session_state:      # set before the student pickers are drawn
+    st.session_state.loc_sel = st.session_state.loc_pick_reg = st.session_state.loc_pick_hist = st.session_state.pop("loc_jump")
 tabs = st.tabs(["Students", "Register / change", f"Approvals ({len(pend)})", "History"])
 
 # ------------------------------------------------------------------ list
@@ -200,6 +202,7 @@ with tabs[2]:
                     c1, c2 = st.columns(2)
                     if c1.button("Approve", key=f"la{r['id']}", type="primary", icon=":material/check:"):
                         P.decide_location(r["id"], True, user["username"], role, note)
+                        st.session_state.loc_jump = r["student_id"]      # Register / History tabs open on this student
                         st.rerun()
                     if c2.button("Reject", key=f"lr{r['id']}", icon=":material/close:"):
                         P.decide_location(r["id"], False, user["username"], role, note)
