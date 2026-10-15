@@ -69,7 +69,8 @@ def id_cards_pdf(students, school_name):
         c.drawString(x + 4 * mm, y + ch - 17 * mm, s["name"][:28])
         c.setFont("Helvetica", 8.5)
         lines = [f"ID: {s['code']}   {s.get('class_name') or ''}{s.get('section') or ''}",
-                 f"Batch {s.get('batch')} {s.get('grp') or ''} · Bus {s.get('bus_no') or ''}", f"Stop: {(s.get('stop_name') or '')[:30]}",
+                 f"Batch {s.get('batch')} {s.get('grp') or ''} · Bus {s.get('bus_no') or ''}", (f"Stop: {(s.get('stop_name') or '')[:30]}" if not s.get("drop_stop_name") or s.get("drop_stop_name") == s.get("stop_name")
+                  else f"Pick: {(s.get('stop_name') or '').replace('Route ', 'R')} · Drop: {s['drop_stop_name'].replace('Route ', 'R')}"),
                  _trips(s)]
         for j, line in enumerate(lines):
             c.drawString(x + 4 * mm, y + ch - (23 + 5 * j) * mm, line)

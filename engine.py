@@ -218,6 +218,8 @@ def manifest_for(bus_id, date, trip_no, con=None):
                 b, st = effective_assignment(s, date, trip_no, c)
                 if b != bus_id:
                     continue
+                if purpose == "DROPOFF" and st == s["stop_id"] and s.get("drop_stop_id"):
+                    st = s["drop_stop_id"]          # v2.0: the student's own drop-off stop (no one-day change approved)
                 out.append({"student_id": s["id"], "code": s["code"], "name": s["name"], "class": f"{s['class_name']}{s['section']}",
                             "batch": batch, "grp": grp, "purpose": purpose, "stop_id": st,
                             "status": "ABSENT_DECLARED" if is_absent(s["id"], date, trip_no, c) else "EXPECTED"})
@@ -570,6 +572,8 @@ def manifest_for_student(stu, date, trip_no, con):
     for batch, grp, purpose in TRIPS[trip_no]["movements"]:
         if stu["batch"] == batch and stu["grp"] == grp:
             bus_id, stop_id = effective_assignment(stu, date, trip_no, con)
+            if purpose == "DROPOFF" and stop_id == stu["stop_id"] and stu.get("drop_stop_id"):
+                stop_id = stu["drop_stop_id"]
             return {"purpose": purpose, "bus_id": bus_id, "stop_id": stop_id, "bus_no": db.bus(bus_id, con)["bus_no"]}
     return None
 

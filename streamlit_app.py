@@ -35,12 +35,17 @@ def _boot():
     import planner             # v2.0 tables (student locations, route plans) + initial enrolment locations
     planner.ensure_schema()
     planner.seed_locations()
+    planner.sync_student_stops()   # badge / daily-list stops follow the approved locations
     if "demo" in (db.setting("school_name", "") or "").lower():
         db.set_setting("school_name", db.SCHOOL_NAME)
     return True
 
 
 _boot()
+if db.setting("v2_stop_sync") != "1":      # one-time on an already running server: align student stops with approved locations
+    import planner as _pl
+    _pl.sync_student_stops()
+    db.set_setting("v2_stop_sync", "1")
 
 st.markdown("""<style>
   :root { --navy:#1B2559; --indigo:#3D4FD6; --indigo-soft:#E9ECFC; --ink:#1A2036; --muted:#6B7390; --line:#E3E7F0;

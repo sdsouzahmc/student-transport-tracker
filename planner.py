@@ -50,6 +50,36 @@ CREATE INDEX IF NOT EXISTS ix_plan ON route_plans(date, bus_id, trip_no, status)
 def ensure_schema(con=None):
     with db.tx(con) as c:
         c.executescript(SCHEMA)
+        cols = {r[1] for r in c.execute("PRAGMA table_info(students)").fetchall()}
+        if "drop_stop_id" not in cols:     # v2.0: default drop-off stop (may differ from the pickup stop)
+            c.execute("ALTER TABLE students ADD COLUMN drop_stop_id INTEGER")
+
+
+def sync_student_stops(student_ids=None, con=None):
+    """Keep the student record (badge / ID card, daily lists) in line with the approved locations:
+    students.stop_id = safe stop of the approved PICKUP location, students.drop_stop_id = safe stop of the DROPOFF location.
+    Only stops on the student's own bus route are written; otherwise the record is left as it is (the planner flags it)."""
+    ensure_schema(con)
+    stops = safe_stops(con)
+    where = "" if student_ids is None else f" AND id IN ({','.join(str(int(i)) for i in student_ids)})"
+    changed = 0
+    with db.tx(con) as c:
+        for s in q("SELECT id, bus_id, stop_id, drop_stop_id FROM students WHERE active=1" + where, (), c):
+            new = {}
+            for kind, col in (("PICKUP", "stop_id"), ("DROPOFF", "drop_stop_id")):
+                loc = current_location(s["id"], kind, c)
+                if not loc or not _valid_qatar(loc["lat"], loc["lon"]):
+                    continue
+                st_, _d = nearest_safe_stop(loc["lat"], loc["lon"], stops, s["bus_id"])
+                if st_ and st_["bus_id"] == s["bus_id"]:
+                    new[col] = st_["id"]
+            if new.get("stop_id") and new["stop_id"] != s["stop_id"]:
+                c.execute("UPDATE students SET stop_id=? WHERE id=?", (new["stop_id"], s["id"]))
+                changed += 1
+            drop = new.get("drop_stop_id") or new.get("stop_id") or s["stop_id"]
+            if drop != s["drop_stop_id"]:
+                c.execute("UPDATE students SET drop_stop_id=? WHERE id=?", (drop, s["id"]))
+    return changed
 
 
 # ------------------------------------------------------------------ geometry / travel time
@@ -121,6 +151,8 @@ def decide_location(loc_id, approve, user, role, note=""):
                            AND requested_by=? AND requested_ts=?""", (row["student_id"], row["requested_by"], row["requested_ts"]), c)
     if linked:
         decide_location(linked["id"], approve, user, role, note or "with the pickup location")
+    if approve:
+        sync_student_stops([row["student_id"]])
     return True
 
 
@@ -250,6 +282,7 @@ def seed_locations(force=False, seed=7):
         c.executemany("""INSERT INTO student_locations(student_id, kind, address, lat, lon, notes, guardian_id, same_as_pickup, status, version,
                          reason, requested_by, requested_ts, decided_by, decided_ts) VALUES (?,?,?,?,?,?,?,?,'APPROVED',1,'Transport enrolment',
                          'system',?, 'system', ?)""", [r + (ts(), ts()) for r in rows])
+    sync_student_stops()
     return len(rows)
 
 

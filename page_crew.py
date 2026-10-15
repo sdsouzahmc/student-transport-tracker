@@ -338,6 +338,44 @@ _cn = [(t("On board"), cnt.get("ONBOARD", 0) + cnt.get("TRANSFER_PENDING", 0), "
 st.markdown("<div class='crewcnt'>" + "".join(f"<div><b style='color:{c}'>{v}</b><span>{l}</span></div>" for l, v, c in _cn) + "</div>",
             unsafe_allow_html=True)
 
+# all assigned students boarded -> banner + one voice announcement per trip (crew and driver screens)
+_onb = cnt.get("ONBOARD", 0) + cnt.get("TRANSFER_PENDING", 0)
+_exp_drop = sum(1 for ln in lines if ln["purpose"] == "DROPOFF" and ln["status"] == "EXPECTED")
+_has_drop = any(ln["purpose"] == "DROPOFF" for ln in lines)
+if cnt.get("EXPECTED", 0) == 0 and _onb:
+    msg("ok", f"<b>✅ {t('All students have boarded')}</b> — {_onb} {t('on board, no one left to pick up.')}")
+    if not st.session_state.get(f"{K}_allb_{run['id']}"):
+        st.session_state[f"{K}_allb_{run['id']}"] = True
+        st.session_state[f"{K}_schb_{run['id']}"] = True
+        st.session_state[f"{K}_sayn"] = st.session_state.get(f"{K}_sayn", 0) + 1
+        alert_sound("All students have boarded the bus.", key=f"{K}_snd{st.session_state[f'{K}_sayn']}")
+elif _has_drop and _exp_drop == 0 and _onb:
+    # combined trip: everyone going home is on board at school (shown until the first child gets off at a stop)
+    if not any(ln["purpose"] == "DROPOFF" and ln["status"] in ("COMPLETED", "RETURNED") for ln in lines):
+        msg("ok", f"<b>✅ {t('All drop-off students are on board')}</b> — {t('the bus can leave school.')}")
+    if not st.session_state.get(f"{K}_schb_{run['id']}"):
+        st.session_state[f"{K}_schb_{run['id']}"] = True
+        st.session_state[f"{K}_sayn"] = st.session_state.get(f"{K}_sayn", 0) + 1
+        alert_sound("All drop-off students are on board. The bus can leave school.", key=f"{K}_snd{st.session_state[f'{K}_sayn']}")
+
+if is_driver and not offline:
+    @st.fragment(run_every=8)
+    def _driver_watch():
+        """Driver screen refreshes by itself: any scan, absence, route change or office message reloads counts, lists and highlights."""
+        sig = (tuple(sorted((r["status"], r["n"]) for r in db.q("SELECT status, COUNT(*) n FROM manifest WHERE run_id=? GROUP BY status",
+                                                                 (run["id"],)))),
+               (db.q1("SELECT MAX(id) m FROM events WHERE run_id=?", (run["id"],)) or {}).get("m"),
+               (db.q1("SELECT MAX(id) m FROM bus_messages WHERE bus_id=?", (bus_id,)) or {}).get("m") if db.q1(
+                   "SELECT name FROM sqlite_master WHERE name='bus_messages'") else None,
+               (P.active_plan(run["date"], bus_id, run["trip_no"]) or {}).get("version"),
+               bool(E.open_run(bus_id)))
+        prev = st.session_state.get(f"{K}_dsig")
+        st.session_state[f"{K}_dsig"] = sig
+        if prev is not None and prev != sig:
+            st.rerun()
+
+    _driver_watch()
+
 if not is_driver and not closed_local and not db.q1("SELECT id FROM events WHERE run_id=? AND result<>'REJECTED' "
                                                      "AND kind IN ('CHECK_IN','CHECK_OUT') LIMIT 1", (run["id"],)):
     with st.expander("↩ Wrong trip? Cancel it (possible until the first child is checked in)", expanded=True):
@@ -575,6 +613,33 @@ if not is_driver:
                 st.session_state[f"{K}_pendings"] = [x_ for x_ in _pl if x_["id"] != pid]
                 st.rerun()
 
+    # one child at a time: who the crew should scan next at this stop
+    _cs = st.session_state.get(f"{K}_stop", SCHOOL_STOP)
+    _off = sorted([ln for ln in lines if (ln["purpose"] == "DROPOFF" and ln["status"] == "ONBOARD" and ln["stop_id"] == _cs) or
+                   (_cs == SCHOOL_STOP and ln["purpose"] == "PICKUP" and ln["status"] == "ONBOARD")], key=lambda ln: ln["name"])
+    _on = sorted([ln for ln in lines if (ln["purpose"] == "PICKUP" and ln["status"] == "EXPECTED" and ln["stop_id"] == _cs) or
+                  (_cs == SCHOOL_STOP and ln["purpose"] == "DROPOFF" and ln["status"] == "EXPECTED")], key=lambda ln: ln["name"])
+    _busy = {p_.get("student_id") for p_ in _pl}
+    _off = [ln for ln in _off if ln["student_id"] not in _busy]
+    _on = [ln for ln in _on if ln["student_id"] not in _busy]
+    _prim, _verb, _other = (_off, t("Check Out"), _on) if kind == "CHECK_OUT" else (_on, t("Check In"), _off)
+    _sname = name_of.get(_cs, t("School"))
+    if _prim:
+        _n1 = _prim[0]
+        _then = (" · " + t("then") + f" {_prim[1]['name']}") if len(_prim) > 1 else ""
+        st.markdown(f"""<div style='border:2px solid #3D4FD6;background:#EEF0FD;border-radius:14px;padding:12px 16px;margin:6px 0 10px'>
+<div style='font-size:.8rem;color:#3D4FD6;font-weight:700;letter-spacing:.05em'>{t('NEXT STUDENT')} · {"⬇" if kind == "CHECK_OUT" else "⬆"} {_verb}</div>
+<div style='font-size:1.55rem;font-weight:800;color:#1A2036;line-height:1.2'>{_n1['name']}</div>
+<div style='font-size:.95rem;color:#3a4160'>{_n1['class'] or ''} · {_n1['code']} · {_sname}</div>
+<div style='font-size:.8rem;color:#6B7390;margin-top:3px'>1 {t('of')} {len(_prim)} {t('at this stop')}{_then}</div></div>""",
+                    unsafe_allow_html=True)
+    elif _other:
+        st.markdown(f"<div class='warn'>{t('Nobody left to')} {_verb.lower()} {t('here')} — {len(_other)} "
+                    f"{t('to') } {(t('Check In') if kind == 'CHECK_OUT' else t('Check Out')).lower()}. {t('Switch the action above.')}</div>",
+                    unsafe_allow_html=True)
+    elif work.get(_cs, {}).get("any") is False and nxt is not None:
+        st.markdown(f"<div class='ok'>✓ {t('Nothing more at')} {_sname}. {t('Next stop')}: <b>{name_of[nxt]}</b></div>", unsafe_allow_html=True)
+
     tab_cam, tab_type, tab_man, tab_photo = st.tabs(["📷 " + t("Scan badge with camera"), "⌨️ " + t("Badge reader / type code"),
                                                      "✍️ " + t("Manual entry"), "📸 Photo scan"])
     with tab_cam:
@@ -651,6 +716,9 @@ _auto = st.toggle("🔄 Auto-refresh lists every 10 s (shows scans made on other
 @st.fragment(run_every=10 if _auto else None)
 def _lists_panel():
     cur_stop = st.session_state.get(f"{K}_stop", SCHOOL_STOP)
+    if is_driver:          # the driver does not pick a stop: highlight the children at the NEXT STOP
+        _dn = st.session_state.get(f"{K}_drvnext")
+        cur_stop = _dn if _dn not in (None, "init") else SCHOOL_STOP
     _q = dstore.load_queue(dev_id) if dev_id else []
     _lines = replica(run["id"], _q)[1] if _q else E.run_lines(run["id"])
     _cnt = pd.Series([ln["status"] for ln in _lines]).value_counts().to_dict() if _lines else {}
@@ -681,15 +749,17 @@ def _lists_panel():
         off_here = [ln for ln in ob if (ln["purpose"] == "DROPOFF" and ln["stop_id"] == cur_stop) or
                     (ln["purpose"] == "PICKUP" and cur_stop == SCHOOL_STOP and ln["status"] == "ONBOARD")]
         st.subheader(f"🟢 {t('On board')} ({len(ob)})")
-        if off_here and not is_driver:
-            st.markdown(f"<span class='pill orange'>📍 {len(off_here)} {t('get off at this stop')}</span>", unsafe_allow_html=True)
+        if off_here:
+            st.markdown(f"<span class='pill orange'>📍 {len(off_here)} {t('get off at the next stop') if is_driver else t('get off at this stop')}</span>",
+                        unsafe_allow_html=True)
         lines_table(ob, ("name", "class", "purpose", "stop_name", "status", "entry_ts"), highlight={ln["id"] for ln in off_here})
     with right:
         ex = [ln for ln in _lines if ln["status"] == "EXPECTED"]
         here = [ln for ln in ex if (ln["purpose"] == "PICKUP" and ln["stop_id"] == cur_stop) or (ln["purpose"] == "DROPOFF" and cur_stop == SCHOOL_STOP)]
         st.subheader(f"⏳ {t('Expected')} ({len(ex)})")
-        if here and not is_driver:
-            st.markdown(f"<span class='pill orange'>📍 {len(here)} {t('expected at this stop')}</span>", unsafe_allow_html=True)
+        if here:
+            st.markdown(f"<span class='pill orange'>📍 {len(here)} {t('expected at the next stop') if is_driver else t('expected at this stop')}</span>",
+                        unsafe_allow_html=True)
         lines_table(sorted(ex, key=lambda ln: (ln not in here, ln["stop_seq"] or 0)), ("name", "class", "purpose", "stop_name"),
                     highlight={ln["id"] for ln in here})
         if ex and not is_driver:

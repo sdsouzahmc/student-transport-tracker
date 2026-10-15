@@ -84,7 +84,7 @@ with tabs[0]:
 with tabs[1]:
     q_ = st.text_input("Search student (name or ID)")
     rows = db.q("""SELECT s.id, s.code AS ID, s.name AS Name, s.class_name||s.section AS Class, s.batch AS Batch, s.grp AS "Group", b.bus_no AS Bus,
-                   st.name AS Stop, CASE s.active WHEN 1 THEN 'Active' ELSE 'Inactive' END AS Status,
+                   st.name AS Stop, (SELECT name FROM stops WHERE id=s.drop_stop_id) AS "Drop-off stop", CASE s.active WHEN 1 THEN 'Active' ELSE 'Inactive' END AS Status,
                    (SELECT COUNT(*) FROM recipients r WHERE r.student_id=s.id AND r.active=1) AS Recipients
                    FROM students s LEFT JOIN buses b ON b.id=s.bus_id LEFT JOIN stops st ON st.id=s.stop_id
                    WHERE s.name LIKE ? OR s.code LIKE ? ORDER BY s.code LIMIT 300""", (f"%{q_}%", f"%{q_}%"))
@@ -180,8 +180,10 @@ with tabs[2]:
     st.markdown("**Printable QR ID cards** (10 per A4 page)")
     bl = db.buses()
     bsel = st.selectbox("Bus", [b["id"] for b in bl], format_func=lambda i: next(b["bus_no"] for b in bl if b["id"] == i), key="idbus")
-    cards = db.q("""SELECT s.code, s.name, s.class_name, s.section, s.batch, s.grp, bu.bus_no, st.name AS stop_name, b.code AS badge FROM students s
+    cards = db.q("""SELECT s.code, s.name, s.class_name, s.section, s.batch, s.grp, bu.bus_no, st.name AS stop_name, ds.name AS drop_stop_name,
+                    b.code AS badge FROM students s
                     JOIN badges b ON b.student_id=s.id AND b.status='ACTIVE' JOIN buses bu ON bu.id=s.bus_id LEFT JOIN stops st ON st.id=s.stop_id
+                    LEFT JOIN stops ds ON ds.id=s.drop_stop_id
                     WHERE s.bus_id=? AND s.active=1 ORDER BY st.seq, s.name""", (bsel,))
     if cards:
         st.download_button(f"⬇ ID cards PDF ({len(cards)} cards)", id_cards_pdf(cards, db.setting("school_name", db.SCHOOL_NAME)),
