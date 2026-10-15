@@ -133,10 +133,19 @@ st.markdown("""<style>
 """ + rtl_css(), unsafe_allow_html=True)
 
 
+APPS = {"parent": ("Parent app", ("guardian",)), "driver": ("Driver app", ("driver",)),
+        "supervisor": ("Supervisor app", ("supervisor", "caretaker"))}
+if "app_mode" not in st.session_state:          # set by the Android apps (…/?app=parent|driver|supervisor)
+    st.session_state.app_mode = (st.query_params.get("app") or "").lower() if (st.query_params.get("app") or "").lower() in APPS else ""
+
+
 def login():
     st.markdown("<div style='font-size:2.2rem;font-weight:800;letter-spacing:-0.02em;color:#1B2559;line-height:1.3'>Auto<span style='color:#3D4FD6'>Trace</span></div>"
                 f"<div style='font-size:1.25rem;font-weight:700;margin-top:-4px'>{t('Student Transport Tracker')} <span style=\'font-size:.8rem;color:#6B7390;font-weight:600\'>v2.0</span></div>", unsafe_allow_html=True)
     st.caption(db.setting("school_name", db.SCHOOL_NAME))
+    _am = st.session_state.get("app_mode")
+    if _am:
+        st.markdown(f"<span class='pill'>📱 {t(APPS[_am][0])}</span>", unsafe_allow_html=True)
     c1, c2 = st.columns([1, 1])
     with c1:
         lang = st.radio(t("Language"), ["English", "العربية"], horizontal=True, index=1 if st.session_state.get("lang") == "ar" else 0)
@@ -172,6 +181,9 @@ def login():
             if not user:
                 db.audit(u, "", "LOGIN_FAILED", "user", u)
                 st.error(t("Wrong username or PIN."))
+            elif st.session_state.get("app_mode") and user["role"] not in APPS[st.session_state.app_mode][1]:
+                st.error(f"{t('This is the')} {t(APPS[st.session_state.app_mode][0])} — "
+                         + t("please sign in with the app for your role."))
             elif user["role"] in db.MFA_ROLES:
                 st.session_state.mfa_pending = user
                 st.session_state.mfa_code = f"{random.randint(0, 999999):06d}"
